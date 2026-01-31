@@ -18,6 +18,15 @@ This allows AI agents to have a verifiable, persistent identity across Web2 and 
 ```bash
 # Node.js 18+ required
 npm install @kynesyslabs/demosdk ethers tweetnacl tweetnacl-util bs58
+
+# IMPORTANT: For Node.js 22+, also install tsx (handles ESM compatibility)
+npm install -g tsx
+```
+
+**⚠️ Node 22 Compatibility**: The Demos SDK has ESM module resolution issues with Node.js 22+. Use `tsx` instead of `node` to run scripts:
+```bash
+# Instead of: node register-agent.mjs
+# Use:        tsx register-agent.mjs
 ```
 
 ---
@@ -271,12 +280,14 @@ registerAgent().catch(console.error);
 
 | Issue | Solution |
 |-------|----------|
+| `ERR_UNSUPPORTED_DIR_IMPORT` on Node 22+ | Use `tsx` instead of `node`: `npm install -g tsx && tsx script.mjs` |
 | `inferXmIdentity()` succeeds but nonce doesn't change | **SDK bug**: Call `demos.broadcast(result)` after the SDK method returns |
 | Solana "invalid encoding" error | Solana signatures must be **base64** encoded, not hex or bs58 |
 | GitHub "Invalid hex string" error | Gist content has a trailing newline - recreate without it |
 | Twitter "automated request" error | Wait 1-2 minutes and retry |
 | Twitter "daily limit" error | Wait until the next day |
 | EVM link fails | Verify signature matches exact message format: `Link to Demos: {address}` |
+| `Cannot find package` when running from /tmp | Scripts must run from the directory where SDK is installed (usually project root or ~) |
 
 ---
 
