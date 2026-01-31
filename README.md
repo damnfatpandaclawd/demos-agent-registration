@@ -1,330 +1,220 @@
-# Demos Network: AI Agent Registration Guide
+# Demos Network Agent Registration
 
-A step-by-step guide for AI agents to create a Demos Network identity with linked blockchain wallets and social accounts.
+Create a Cross-Context Identity (CCI) with GitHub and Twitter linked.
 
-## What is Demos?
+## Quick Start
 
-Demos Network provides **Cross-Context Identity (CCI)** - a unified identity that links:
-- Blockchain wallets (EVM, Solana, MultiversX, NEAR, TON, XRPL, Aptos)
-- Social accounts (Twitter, GitHub, Discord, Telegram)
-- Post-quantum cryptographic identities
-
-This allows AI agents to have a verifiable, persistent identity across Web2 and Web3.
-
----
-
-## Prerequisites
-
+**One-liner to check if you can run this:**
 ```bash
-# Node.js 18+ required
-npm install @kynesyslabs/demosdk ethers tweetnacl tweetnacl-util bs58
-
-# IMPORTANT: For Node.js 22+, also install tsx (handles ESM compatibility)
-npm install -g tsx
-```
-
-**⚠️ Node 22 Compatibility**: The Demos SDK has ESM module resolution issues with Node.js 22+. Use `tsx` instead of `node` to run scripts:
-```bash
-# Instead of: node register-agent.mjs
-# Use:        tsx register-agent.mjs
+node -v && npm list @kynesyslabs/demosdk 2>/dev/null || echo "Run: npm install @kynesyslabs/demosdk puppeteer"
 ```
 
 ---
 
-## Step 1: Create Your Demos Wallet
+## Complete Script
 
-```javascript
-import { Demos } from "@kynesyslabs/demosdk/websdk";
-
-const demos = new Demos();
-await demos.connect("https://demosnode.discus.sh/");
-
-// Generate a 12-word BIP39 mnemonic - SAVE THIS SECURELY!
-const mnemonic = demos.newMnemonic();
-console.log("Your mnemonic (SAVE THIS!):", mnemonic);
-
-// Connect wallet using mnemonic
-await demos.connectWallet(mnemonic);
-
-// Get your Demos address
-const demosAddress = demos.getAddress();
-console.log("Your Demos Address:", demosAddress);
-```
-
-**⚠️ CRITICAL**: Save your mnemonic securely. This is your wallet backup and cannot be recovered if lost.
-
----
-
-## Step 2: Link an EVM Wallet (Optional)
-
-If you have an Ethereum/EVM wallet you want to link:
-
-```javascript
-import { Identities } from "@kynesyslabs/demosdk/abstraction";
-import { ethers } from "ethers";
-
-const identities = new Identities();
-
-// Your existing ETH wallet credentials
-const ETH_ADDRESS = "0xYourEthAddress";
-const ETH_PRIVATE_KEY = "0xYourPrivateKey";
-
-// Create signature proving ownership
-const ethWallet = new ethers.Wallet(ETH_PRIVATE_KEY);
-const message = `Link to Demos: ${demosAddress}`;
-const signature = await ethWallet.signMessage(message);
-
-// Submit to Demos
-const xmPayload = {
-  method: "inferIdentityFromSignature",
-  target_identity: {
-    chain: "evm",
-    subchain: "mainnet",  // or: sepolia, polygon, arbitrum, optimism, base
-    chainId: 1,
-    isEVM: true,
-    targetAddress: ETH_ADDRESS,
-    signature: signature,
-    signedData: message
-  }
-};
-
-const result = await identities.inferXmIdentity(demos, xmPayload);
-// IMPORTANT: SDK bug - must broadcast manually!
-const broadcastResult = await demos.broadcast(result);
-console.log("EVM wallet linked:", broadcastResult);
-```
-
----
-
-## Step 3: Link a Solana Wallet (Optional)
-
-```javascript
-import { Keypair } from "@solana/web3.js";
-import nacl from "tweetnacl";
-import { encodeBase64 } from "tweetnacl-util";
-
-// Your Solana keypair
-const solanaKeypair = Keypair.generate(); // or load existing
-const solanaAddress = solanaKeypair.publicKey.toBase58();
-
-// Create signature proving ownership
-const message = `Link to Demos: ${demosAddress}`;
-const messageBytes = new TextEncoder().encode(message);
-const signatureBytes = nacl.sign.detached(messageBytes, solanaKeypair.secretKey);
-
-// IMPORTANT: Solana signatures must be base64 encoded!
-const signature = encodeBase64(signatureBytes);
-
-const xmPayload = {
-  method: "inferIdentityFromSignature",
-  target_identity: {
-    chain: "solana",
-    subchain: "mainnet",  // or: devnet
-    isEVM: false,
-    targetAddress: solanaAddress,
-    signature: signature,
-    signedData: message
-  }
-};
-
-const result = await identities.inferXmIdentity(demos, xmPayload);
-const broadcastResult = await demos.broadcast(result);
-console.log("Solana wallet linked:", broadcastResult);
-```
-
----
-
-## Step 4: Get Your Web2 Proof Payload
-
-This payload will be used to prove ownership of your social accounts:
-
-```javascript
-const identities = new Identities();
-const proofPayload = await identities.createWeb2ProofPayload(demos);
-console.log("Your proof payload:", proofPayload);
-// Output: demos:dw2p:ed25519:0x...
-```
-
-Save this payload - you'll need it for Twitter and GitHub linking.
-
----
-
-## Step 5: Link Twitter
-
-1. **Post a tweet** containing your exact proof payload
-2. **Link the tweet to your Demos identity:**
-
-```javascript
-const tweetUrl = "https://x.com/YourHandle/status/1234567890";
-const result = await identities.addTwitterIdentity(demos, tweetUrl);
-// IMPORTANT: SDK bug - must broadcast manually!
-const broadcastResult = await demos.broadcast(result);
-console.log("Twitter linked:", broadcastResult);
-```
-
----
-
-## Step 6: Link GitHub
-
-1. **Create a public Gist** containing your proof payload:
-   - Go to https://gist.github.com
-   - Create a new **public** gist
-   - Filename: `demos-proof.txt`
-   - Content: Your proof payload (e.g., `demos:dw2p:ed25519:0x...`)
-   - **IMPORTANT**: No trailing newline! The content must be exactly the proof payload.
-
-2. **Link the Gist to your Demos identity:**
-
-```javascript
-const gistUrl = "https://gist.github.com/YourUsername/gist_id";
-const result = await identities.addGithubIdentity(demos, gistUrl);
-// IMPORTANT: SDK bug - must broadcast manually!
-const broadcastResult = await demos.broadcast(result);
-console.log("GitHub linked:", broadcastResult);
-```
-
----
-
-## Step 7: Verify Your Identities
-
-```javascript
-const allIdentities = await identities.getIdentities(demos);
-console.log("Your linked identities:", JSON.stringify(allIdentities?.data?.response, null, 2));
-```
-
-Expected output structure:
-```json
-{
-  "xm": {
-    "evm": { "mainnet": [{ "address": "0x..." }] },
-    "solana": { "mainnet": [{ "address": "..." }] }
-  },
-  "web2": {
-    "twitter": [{ "username": "YourHandle" }],
-    "github": [{ "username": "YourUsername" }]
-  }
-}
-```
-
----
-
-## Complete Registration Script
-
-Save as `register-agent.mjs`:
+Save as `register.mjs` and run with `npx tsx register.mjs`:
 
 ```javascript
 import { Demos } from "@kynesyslabs/demosdk/websdk";
 import { Identities } from "@kynesyslabs/demosdk/abstraction";
+import puppeteer from "puppeteer";
+import { execSync } from "child_process";
 import fs from "fs";
 
-async function registerAgent() {
-  // 1. Connect to Demos
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const CREDS = "demos-identity.json";
+const TWITTER_HANDLE = "YOUR_TWITTER_HANDLE"; // CHANGE THIS
+
+async function main() {
+  console.log("=== Demos Identity Registration ===\n");
+
+  // 1. CREATE WALLET
   const demos = new Demos();
   await demos.connect("https://demosnode.discus.sh/");
-
-  // 2. Generate mnemonic and connect wallet
   const mnemonic = demos.newMnemonic();
   await demos.connectWallet(mnemonic);
-  const demosAddress = demos.getAddress();
-
-  console.log("=== YOUR NEW DEMOS IDENTITY ===");
-  console.log("Mnemonic (SAVE SECURELY!):", mnemonic);
-  console.log("Demos Address:", demosAddress);
-
-  // 3. Get Web2 proof payload
+  const address = demos.getAddress();
   const identities = new Identities();
-  const proofPayload = await identities.createWeb2ProofPayload(demos);
+  const proof = await identities.createWeb2ProofPayload(demos);
 
-  console.log("\n=== WEB2 VERIFICATION ===");
-  console.log("Post this exact text as a tweet AND in a GitHub Gist:");
-  console.log(proofPayload);
+  console.log("✓ Wallet created");
+  console.log("  Address:", address);
 
-  // 4. Save credentials locally
-  const credentials = {
-    mnemonic,
-    demosAddress,
-    proofPayload,
-    createdAt: new Date().toISOString(),
-    note: "KEEP THIS FILE SECURE - DO NOT SHARE!"
-  };
+  const creds = { mnemonic, address, proof, created: new Date().toISOString() };
+  fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
 
-  fs.writeFileSync("my-demos-credentials.json", JSON.stringify(credentials, null, 2));
-  console.log("\n✓ Credentials saved to my-demos-credentials.json");
+  // 2. CREATE GITHUB GIST
+  const ghToken = process.env.GH_TOKEN;
+  if (!ghToken) throw new Error("Set GH_TOKEN environment variable");
 
-  console.log("\n=== NEXT STEPS ===");
-  console.log("1. Tweet the proof payload from your Twitter account");
-  console.log("2. Create a public GitHub Gist with the proof payload (no trailing newline!)");
-  console.log("3. Run the linking scripts with your tweet URL and Gist URL");
+  const gist = execSync(
+    `echo -n '${proof}' | GH_TOKEN="${ghToken}" gh gist create --public -f demos-proof.txt -`,
+    { encoding: "utf8" }
+  ).trim();
+
+  console.log("✓ Gist created:", gist);
+  creds.gist = gist;
+  fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
+
+  // 3. LINK GITHUB - Method: addGithubIdentity(demos, gistUrl)
+  const ghResult = await identities.addGithubIdentity(demos, gist);
+  const ghBroadcast = await demos.broadcast(ghResult);
+
+  if (!ghBroadcast?.extra?.confirmationBlock) throw new Error("GitHub link failed");
+  console.log("✓ GitHub linked at block:", ghBroadcast.extra.confirmationBlock);
+
+  // 4. POST TWEET WITH PUPPETEER
+  const cookiePath = `${process.env.HOME}/.config/bird/config.json`;
+  if (!fs.existsSync(cookiePath)) throw new Error("Twitter cookies not found at " + cookiePath);
+  const cookies = JSON.parse(fs.readFileSync(cookiePath, "utf8"));
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+           "--disable-blink-features=AutomationControlled"]
+  });
+
+  const page = await browser.newPage();
+  await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0");
+  await page.setViewport({ width: 1280, height: 800 });
+  await page.setCookie(
+    { name: "auth_token", value: cookies.auth_token, domain: ".x.com", path: "/", secure: true },
+    { name: "ct0", value: cookies.ct0, domain: ".x.com", path: "/", secure: true }
+  );
+
+  // Human-like: visit home first
+  await page.goto("https://x.com/home", { waitUntil: "networkidle2", timeout: 60000 });
+  await sleep(3000);
+  await page.goto("https://x.com/compose/post", { waitUntil: "networkidle2", timeout: 60000 });
+  await sleep(3000);
+
+  if (page.url().includes("login")) throw new Error("Not logged into Twitter");
+
+  const textbox = await page.$('[data-testid="tweetTextarea_0"]');
+  if (!textbox) throw new Error("Tweet textbox not found");
+
+  await textbox.click();
+  await sleep(500);
+
+  // Type SLOWLY - fast typing triggers rejection
+  for (let i = 0; i < proof.length; i++) {
+    await page.keyboard.type(proof[i], { delay: 25 + Math.random() * 25 });
+    if (i % 15 === 0) await sleep(100);
+  }
+
+  await sleep(3000);
+  await (await page.$('[data-testid="tweetButton"]')).click();
+  await sleep(10000);
+
+  if (page.url().includes("compose")) throw new Error("Tweet was rejected");
+  console.log("✓ Tweet posted");
+
+  // Get tweet URL
+  await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(5000);
+
+  const links = await page.$$eval('a[href*="/status/"]', els =>
+    els.map(e => e.href).filter(h => h.includes(`/${TWITTER_HANDLE}/status/`))
+  );
+  const urls = [...new Set(links.map(u => u.match(/https:\/\/x\.com\/\w+\/status\/\d+/)?.[0]).filter(Boolean))];
+  urls.sort((a, b) => BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1);
+
+  await browser.close();
+
+  const tweetUrl = urls[0];
+  if (!tweetUrl) throw new Error("Could not find tweet URL");
+  console.log("✓ Tweet URL:", tweetUrl);
+  creds.tweet = tweetUrl;
+  fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
+
+  // 5. LINK TWITTER - Method: addTwitterIdentity(demos, tweetUrl)
+  const twResult = await identities.addTwitterIdentity(demos, tweetUrl);
+  const twBroadcast = await demos.broadcast(twResult);
+
+  if (!twBroadcast?.extra?.confirmationBlock) throw new Error("Twitter link failed");
+  console.log("✓ Twitter linked at block:", twBroadcast.extra.confirmationBlock);
+
+  // 6. VERIFY
+  const info = await demos.getAddressInfo(address);
+  creds.nonce = info?.nonce;
+  creds.complete = true;
+  fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
+
+  console.log("\n=== COMPLETE ===");
+  console.log("Address:", address);
+  console.log("Nonce:", info?.nonce, "(should be 2)");
+  console.log("Credentials:", CREDS);
 }
 
-registerAgent().catch(console.error);
+main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 ```
 
 ---
 
-## Supported Chains
+## Before Running
 
-| Chain | Subchains | Signature Format |
-|-------|-----------|------------------|
-| `evm` | mainnet, sepolia, polygon, arbitrum, optimism, base | Hex (0x-prefixed) |
-| `solana` | mainnet, devnet | **Base64** |
-| `multiversx` | mainnet, devnet | Hex |
-| `near` | mainnet, testnet | Base58 |
-| `ton` | mainnet, testnet | Base64 |
-| `xrpl` | mainnet, testnet | Hex |
-| `aptos` | mainnet, testnet | Hex |
+1. **Install dependencies** (in your home directory, not /tmp):
+   ```bash
+   cd ~ && npm install @kynesyslabs/demosdk puppeteer
+   ```
+
+2. **Set environment:**
+   ```bash
+   export GH_TOKEN="your_github_token"
+   ```
+
+3. **Twitter cookies** must exist at `~/.config/bird/config.json`:
+   ```json
+   {"auth_token": "...", "ct0": "..."}
+   ```
+   Get from browser DevTools → Application → Cookies → x.com
+
+4. **Edit the script:** Change `TWITTER_HANDLE` to your Twitter username
+
+5. **For headless servers (VPS/CI):** The script uses `headless: true` by default. If you see "Missing X server" errors, ensure you're using Puppeteer (not Playwright) and `headless: true` is set.
+
+---
+
+## SDK Method Reference
+
+| Task | Exact Call |
+|------|------------|
+| Create proof | `identities.createWeb2ProofPayload(demos)` |
+| Link GitHub | `identities.addGithubIdentity(demos, gistUrl)` |
+| Link Twitter | `identities.addTwitterIdentity(demos, tweetUrl)` |
+| Commit to chain | `demos.broadcast(result)` ← **REQUIRED after every link** |
+
+---
+
+## Success Indicators
+
+| Step | Success |
+|------|---------|
+| Wallet | Address starts with `0x`, 66 chars |
+| Gist | Returns `https://gist.github.com/...` |
+| GitHub link | `broadcast.extra.confirmationBlock` exists |
+| Tweet | Redirects away from `/compose/post` |
+| Twitter link | `broadcast.extra.confirmationBlock` exists |
+| Complete | Nonce = 2 |
 
 ---
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| `ERR_UNSUPPORTED_DIR_IMPORT` on Node 22+ | Use `tsx` instead of `node`: `npm install -g tsx && tsx script.mjs` |
-| `inferXmIdentity()` succeeds but nonce doesn't change | **SDK bug**: Call `demos.broadcast(result)` after the SDK method returns |
-| Solana "invalid encoding" error | Solana signatures must be **base64** encoded, not hex or bs58 |
-| GitHub "Invalid hex string" error | Gist content has a trailing newline - recreate without it |
-| Twitter "automated request" error | Wait 1-2 minutes and retry |
-| Twitter "daily limit" error | Wait until the next day |
-| EVM link fails | Verify signature matches exact message format: `Link to Demos: {address}` |
-| `Cannot find package` when running from /tmp | Scripts must run from the directory where SDK is installed (usually project root or ~) |
+| Error | Fix |
+|-------|-----|
+| `ERR_UNSUPPORTED_DIR_IMPORT` | Use `npx tsx` not `node` |
+| `GH_TOKEN` not set | `export GH_TOKEN="..."` |
+| Twitter cookies not found | Create `~/.config/bird/config.json` |
+| Tweet rejected | Puppeteer types too fast - already fixed in script |
+| Nonce still 0 | You forgot `demos.broadcast(result)` |
+| "Invalid hex string" | Gist has trailing newline - use `echo -n` |
+| "Missing X server" or "XServer running" | Ensure `headless: true` is set in Puppeteer launch options |
+| Puppeteer not found | Run `npm install puppeteer` in your home directory |
 
 ---
 
-## Security Best Practices
+## License
 
-1. **Never share your mnemonic** - It controls your entire identity
-2. **Store credentials securely** - Use encrypted storage or a secrets manager
-3. **Use separate wallets** - Don't link wallets with significant funds
-4. **Verify before signing** - Always check what you're signing
-
----
-
-## Resources
-
-- **Demos Network**: https://demos.sh
-- **SDK Documentation**: https://docs.kynesys.xyz
-- **Faucet** (testnet tokens): https://faucet.demos.sh
-
----
-
-## Example: Checking Your Identity Status
-
-```javascript
-import { Demos } from "@kynesyslabs/demosdk/websdk";
-
-const demos = new Demos();
-await demos.connect("https://demosnode.discus.sh/");
-await demos.connectWallet("your twelve word mnemonic phrase here");
-
-const address = demos.getAddress();
-const info = await demos.getAddressInfo(address);
-
-console.log("Address:", address);
-console.log("Nonce:", info?.nonce);  // Number of identity transactions
-console.log("Balance:", info?.balance);
-```
-
----
-
-*This guide is for AI agents registering on the Demos Network. For human users, see the official documentation at docs.kynesys.xyz.*
+MIT - Use freely for AI agent development on Demos Network.
