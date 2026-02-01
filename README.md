@@ -23,6 +23,125 @@ import fs from "fs";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const CREDS = "demos-identity.json";
 const TWITTER_HANDLE = "YOUR_TWITTER_HANDLE"; // CHANGE THIS
+const COOKIE_PATH = `${process.env.HOME}/.config/bird/config.json`;
+
+// Tweet posting methods in priority order
+async function postTweetCLI(proof) {
+  console.log("  [1/3] Trying ~/tweet CLI...");
+  execSync(`~/tweet tweet '${proof}'`, { encoding: "utf8", timeout: 30000 });
+  await sleep(5000);
+  const search = execSync(`~/tweet search 'from:${TWITTER_HANDLE} ${proof.slice(0, 30)}'`, { encoding: "utf8" });
+  const match = search.match(/https:\/\/x\.com\/\w+\/status\/\d+/);
+  if (match) return match[0];
+  throw new Error("Tweet posted but URL not found");
+}
+
+async function postTweetPlaywright(proof) {
+  console.log("  [2/3] Trying Playwright...");
+  const { chromium } = await import("playwright");
+  const cookies = JSON.parse(fs.readFileSync(COOKIE_PATH, "utf8"));
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    await context.addCookies([
+      { name: "auth_token", value: cookies.auth_token, domain: ".x.com", path: "/" },
+      { name: "ct0", value: cookies.ct0, domain: ".x.com", path: "/" }
+    ]);
+
+    const page = await context.newPage();
+    await page.goto("https://x.com/home", { waitUntil: "networkidle", timeout: 60000 });
+    await sleep(2000);
+    await page.goto("https://x.com/compose/post", { waitUntil: "networkidle", timeout: 60000 });
+    await sleep(2000);
+
+    if (page.url().includes("login")) throw new Error("Not logged in");
+
+    const textbox = await page.locator('[data-testid="tweetTextarea_0"]');
+    await textbox.click();
+    await textbox.pressSequentially(proof, { delay: 30 });
+    await sleep(2000);
+
+    await page.locator('[data-testid="tweetButton"]').click();
+    await sleep(8000);
+
+    if (page.url().includes("compose")) throw new Error("Tweet rejected");
+
+    await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(3000);
+
+    const links = await page.locator(`a[href*="/${TWITTER_HANDLE}/status/"]`).all();
+    const urls = [];
+    for (const link of links) {
+      const href = await link.getAttribute("href");
+      if (href) urls.push(`https://x.com${href}`);
+    }
+
+    const unique = [...new Set(urls)].sort((a, b) =>
+      BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1
+    );
+
+    if (unique[0]) return unique[0];
+    throw new Error("Tweet posted but URL not found");
+  } finally {
+    await browser.close();
+  }
+}
+
+async function postTweetPuppeteer(proof) {
+  console.log("  [3/3] Trying Puppeteer...");
+  const puppeteer = await import("puppeteer");
+  const cookies = JSON.parse(fs.readFileSync(COOKIE_PATH, "utf8"));
+
+  const browser = await puppeteer.default.launch({
+    headless: "new",
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.setCookie(
+      { name: "auth_token", value: cookies.auth_token, domain: ".x.com", path: "/", secure: true },
+      { name: "ct0", value: cookies.ct0, domain: ".x.com", path: "/", secure: true }
+    );
+
+    await page.goto("https://x.com/home", { waitUntil: "networkidle2", timeout: 60000 });
+    await sleep(2000);
+    await page.goto("https://x.com/compose/post", { waitUntil: "networkidle2", timeout: 60000 });
+    await sleep(2000);
+
+    if (page.url().includes("login")) throw new Error("Not logged in");
+
+    const textbox = await page.$('[data-testid="tweetTextarea_0"]');
+    if (!textbox) throw new Error("Textbox not found");
+
+    await textbox.click();
+    for (let i = 0; i < proof.length; i++) {
+      await page.keyboard.type(proof[i], { delay: 25 + Math.random() * 25 });
+      if (i % 15 === 0) await sleep(100);
+    }
+
+    await sleep(2000);
+    await (await page.$('[data-testid="tweetButton"]')).click();
+    await sleep(8000);
+
+    if (page.url().includes("compose")) throw new Error("Tweet rejected");
+
+    await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(3000);
+
+    const links = await page.$$eval(`a[href*="/${TWITTER_HANDLE}/status/"]`, els => els.map(e => e.href));
+    const unique = [...new Set(links)].sort((a, b) =>
+      BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1
+    );
+
+    if (unique[0]) return unique[0];
+    throw new Error("Tweet posted but URL not found");
+  } finally {
+    await browser.close();
+  }
+}
 
 async function main() {
   console.log("=== Demos Identity Registration ===\n");
@@ -62,30 +181,44 @@ async function main() {
   if (!ghBroadcast?.extra?.confirmationBlock) throw new Error("GitHub link failed");
   console.log("✓ GitHub linked at block:", ghBroadcast.extra.confirmationBlock);
 
-  // 4. POST TWEET - Use CLI first (works on headless), fallback to manual
+  // 4. POST TWEET - Cascade: CLI → Playwright → Puppeteer → Manual
   let tweetUrl = null;
+  console.log("\n📤 Posting tweet...");
 
-  // Method A: Try ~/tweet CLI (bird) if available
+  // Method A: CLI (works on headless servers)
   try {
-    console.log("Attempting tweet via CLI...");
-    execSync(`~/tweet tweet '${proof}'`, { encoding: "utf8", timeout: 30000 });
-    await sleep(5000); // Wait for tweet to propagate
-
-    // Find the tweet URL
-    const search = execSync(`~/tweet search 'from:${TWITTER_HANDLE} ${proof.slice(0, 30)}'`, { encoding: "utf8" });
-    const urlMatch = search.match(/https:\/\/x\.com\/\w+\/status\/\d+/);
-    if (urlMatch) tweetUrl = urlMatch[0];
+    tweetUrl = await postTweetCLI(proof);
     console.log("✓ Tweet posted via CLI");
   } catch (e) {
-    console.log("CLI tweet failed:", e.message);
+    console.log(`  CLI failed: ${e.message}`);
   }
 
-  // Method B: Manual fallback
+  // Method B: Playwright (better headless support)
+  if (!tweetUrl && fs.existsSync(COOKIE_PATH)) {
+    try {
+      tweetUrl = await postTweetPlaywright(proof);
+      console.log("✓ Tweet posted via Playwright");
+    } catch (e) {
+      console.log(`  Playwright failed: ${e.message}`);
+    }
+  }
+
+  // Method C: Puppeteer (fallback browser automation)
+  if (!tweetUrl && fs.existsSync(COOKIE_PATH)) {
+    try {
+      tweetUrl = await postTweetPuppeteer(proof);
+      console.log("✓ Tweet posted via Puppeteer");
+    } catch (e) {
+      console.log(`  Puppeteer failed: ${e.message}`);
+    }
+  }
+
+  // Method D: Manual fallback
   if (!tweetUrl) {
     console.log("\n⚠️  MANUAL STEP REQUIRED:");
-    console.log("Post this tweet manually:");
-    console.log(`  ${proof}`);
-    console.log("\nThen run: npx tsx link-twitter.mjs <TWEET_URL>");
+    console.log("All automated methods failed. Post this tweet manually:");
+    console.log(`\n  ${proof}\n`);
+    console.log("Then run: npx tsx link-twitter.mjs <TWEET_URL>");
 
     creds.twitterPending = true;
     creds.proofToTweet = proof;
@@ -128,6 +261,8 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 1. **Install dependencies** (in your home directory, not /tmp):
    ```bash
    cd ~ && npm install @kynesyslabs/demosdk
+   # Optional for browser automation:
+   npm install playwright puppeteer
    ```
 
 2. **Set environment:**
@@ -137,7 +272,18 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 
 3. **Edit the script:** Change `TWITTER_HANDLE` to your Twitter username
 
-4. **For headless servers:** The script uses `~/tweet` CLI (bird) which works without a display. If unavailable, it falls back to manual instructions.
+4. **Twitter cookies** (optional, for browser automation):
+   ```bash
+   # Create ~/.config/bird/config.json with:
+   {"auth_token": "...", "ct0": "..."}
+   # Get from browser DevTools → Application → Cookies → x.com
+   ```
+
+5. **Tweet posting priority:**
+   - `~/tweet` CLI (bird) - works on headless servers
+   - Playwright - better headless support
+   - Puppeteer - fallback browser automation
+   - Manual - if all automated methods fail
 
 ---
 
@@ -174,7 +320,9 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 | Nonce still 0 | You forgot `demos.broadcast(result)` |
 | "Invalid hex string" | Gist has trailing newline - use `echo -n` |
 | `Cannot find package` | Run scripts from ~ not /tmp |
-| Tweet CLI fails | Falls back to manual - post tweet yourself |
+| "Missing X server" | CLI method works without display; browser methods need xvfb |
+| All tweet methods fail | Post tweet manually, then run link-twitter.mjs |
+| Twitter "automated" error | Wait 2 min, retry, or use different method |
 
 ---
 
