@@ -4,9 +4,8 @@ Create a Cross-Context Identity (CCI) with GitHub and Twitter linked.
 
 ## Quick Start
 
-**One-liner to check if you can run this:**
 ```bash
-node -v && npm list @kynesyslabs/demosdk 2>/dev/null || echo "Run: npm install @kynesyslabs/demosdk puppeteer"
+node -v && npm list @kynesyslabs/demosdk 2>/dev/null || echo "Run: npm install @kynesyslabs/demosdk"
 ```
 
 ---
@@ -18,7 +17,6 @@ Save as `register.mjs` and run with `npx tsx register.mjs`:
 ```javascript
 import { Demos } from "@kynesyslabs/demosdk/websdk";
 import { Identities } from "@kynesyslabs/demosdk/abstraction";
-import puppeteer from "puppeteer";
 import { execSync } from "child_process";
 import fs from "fs";
 
@@ -57,78 +55,51 @@ async function main() {
   creds.gist = gist;
   fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
 
-  // 3. LINK GITHUB - Method: addGithubIdentity(demos, gistUrl)
+  // 3. LINK GITHUB
   const ghResult = await identities.addGithubIdentity(demos, gist);
   const ghBroadcast = await demos.broadcast(ghResult);
 
   if (!ghBroadcast?.extra?.confirmationBlock) throw new Error("GitHub link failed");
   console.log("✓ GitHub linked at block:", ghBroadcast.extra.confirmationBlock);
 
-  // 4. POST TWEET WITH PUPPETEER
-  const cookiePath = `${process.env.HOME}/.config/bird/config.json`;
-  if (!fs.existsSync(cookiePath)) throw new Error("Twitter cookies not found at " + cookiePath);
-  const cookies = JSON.parse(fs.readFileSync(cookiePath, "utf8"));
+  // 4. POST TWEET - Use CLI first (works on headless), fallback to manual
+  let tweetUrl = null;
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-           "--disable-blink-features=AutomationControlled"]
-  });
+  // Method A: Try ~/tweet CLI (bird) if available
+  try {
+    console.log("Attempting tweet via CLI...");
+    execSync(`~/tweet tweet '${proof}'`, { encoding: "utf8", timeout: 30000 });
+    await sleep(5000); // Wait for tweet to propagate
 
-  const page = await browser.newPage();
-  await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0");
-  await page.setViewport({ width: 1280, height: 800 });
-  await page.setCookie(
-    { name: "auth_token", value: cookies.auth_token, domain: ".x.com", path: "/", secure: true },
-    { name: "ct0", value: cookies.ct0, domain: ".x.com", path: "/", secure: true }
-  );
-
-  // Human-like: visit home first
-  await page.goto("https://x.com/home", { waitUntil: "networkidle2", timeout: 60000 });
-  await sleep(3000);
-  await page.goto("https://x.com/compose/post", { waitUntil: "networkidle2", timeout: 60000 });
-  await sleep(3000);
-
-  if (page.url().includes("login")) throw new Error("Not logged into Twitter");
-
-  const textbox = await page.$('[data-testid="tweetTextarea_0"]');
-  if (!textbox) throw new Error("Tweet textbox not found");
-
-  await textbox.click();
-  await sleep(500);
-
-  // Type SLOWLY - fast typing triggers rejection
-  for (let i = 0; i < proof.length; i++) {
-    await page.keyboard.type(proof[i], { delay: 25 + Math.random() * 25 });
-    if (i % 15 === 0) await sleep(100);
+    // Find the tweet URL
+    const search = execSync(`~/tweet search 'from:${TWITTER_HANDLE} ${proof.slice(0, 30)}'`, { encoding: "utf8" });
+    const urlMatch = search.match(/https:\/\/x\.com\/\w+\/status\/\d+/);
+    if (urlMatch) tweetUrl = urlMatch[0];
+    console.log("✓ Tweet posted via CLI");
+  } catch (e) {
+    console.log("CLI tweet failed:", e.message);
   }
 
-  await sleep(3000);
-  await (await page.$('[data-testid="tweetButton"]')).click();
-  await sleep(10000);
+  // Method B: Manual fallback
+  if (!tweetUrl) {
+    console.log("\n⚠️  MANUAL STEP REQUIRED:");
+    console.log("Post this tweet manually:");
+    console.log(`  ${proof}`);
+    console.log("\nThen run: npx tsx link-twitter.mjs <TWEET_URL>");
 
-  if (page.url().includes("compose")) throw new Error("Tweet was rejected");
-  console.log("✓ Tweet posted");
+    creds.twitterPending = true;
+    creds.proofToTweet = proof;
+    fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
 
-  // Get tweet URL
-  await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(5000);
+    console.log("\n✓ Credentials saved. Complete Twitter linking manually.");
+    return;
+  }
 
-  const links = await page.$$eval('a[href*="/status/"]', els =>
-    els.map(e => e.href).filter(h => h.includes(`/${TWITTER_HANDLE}/status/`))
-  );
-  const urls = [...new Set(links.map(u => u.match(/https:\/\/x\.com\/\w+\/status\/\d+/)?.[0]).filter(Boolean))];
-  urls.sort((a, b) => BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1);
-
-  await browser.close();
-
-  const tweetUrl = urls[0];
-  if (!tweetUrl) throw new Error("Could not find tweet URL");
   console.log("✓ Tweet URL:", tweetUrl);
   creds.tweet = tweetUrl;
   fs.writeFileSync(CREDS, JSON.stringify(creds, null, 2));
 
-  // 5. LINK TWITTER - Method: addTwitterIdentity(demos, tweetUrl)
+  // 5. LINK TWITTER
   const twResult = await identities.addTwitterIdentity(demos, tweetUrl);
   const twBroadcast = await demos.broadcast(twResult);
 
@@ -156,7 +127,7 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 
 1. **Install dependencies** (in your home directory, not /tmp):
    ```bash
-   cd ~ && npm install @kynesyslabs/demosdk puppeteer
+   cd ~ && npm install @kynesyslabs/demosdk
    ```
 
 2. **Set environment:**
@@ -164,15 +135,9 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
    export GH_TOKEN="your_github_token"
    ```
 
-3. **Twitter cookies** must exist at `~/.config/bird/config.json`:
-   ```json
-   {"auth_token": "...", "ct0": "..."}
-   ```
-   Get from browser DevTools → Application → Cookies → x.com
+3. **Edit the script:** Change `TWITTER_HANDLE` to your Twitter username
 
-4. **Edit the script:** Change `TWITTER_HANDLE` to your Twitter username
-
-5. **For headless servers (VPS/CI):** The script uses `headless: true` by default. If you see "Missing X server" errors, ensure you're using Puppeteer (not Playwright) and `headless: true` is set.
+4. **For headless servers:** The script uses `~/tweet` CLI (bird) which works without a display. If unavailable, it falls back to manual instructions.
 
 ---
 
@@ -194,7 +159,7 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 | Wallet | Address starts with `0x`, 66 chars |
 | Gist | Returns `https://gist.github.com/...` |
 | GitHub link | `broadcast.extra.confirmationBlock` exists |
-| Tweet | Redirects away from `/compose/post` |
+| Tweet | URL contains `/status/` |
 | Twitter link | `broadcast.extra.confirmationBlock` exists |
 | Complete | Nonce = 2 |
 
@@ -206,12 +171,10 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 |-------|-----|
 | `ERR_UNSUPPORTED_DIR_IMPORT` | Use `npx tsx` not `node` |
 | `GH_TOKEN` not set | `export GH_TOKEN="..."` |
-| Twitter cookies not found | Create `~/.config/bird/config.json` |
-| Tweet rejected | Puppeteer types too fast - already fixed in script |
 | Nonce still 0 | You forgot `demos.broadcast(result)` |
 | "Invalid hex string" | Gist has trailing newline - use `echo -n` |
-| "Missing X server" or "XServer running" | Ensure `headless: true` is set in Puppeteer launch options |
-| Puppeteer not found | Run `npm install puppeteer` in your home directory |
+| `Cannot find package` | Run scripts from ~ not /tmp |
+| Tweet CLI fails | Falls back to manual - post tweet yourself |
 
 ---
 
