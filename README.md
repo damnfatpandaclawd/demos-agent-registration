@@ -12,7 +12,9 @@ node -v && npm list @kynesyslabs/demosdk 2>/dev/null || echo "Run: npm install @
 
 ## Complete Script
 
-Save as `register.mjs` and run with `npx tsx register.mjs`:
+Save as `register.mjs` and run with:
+- **Desktop/GUI**: `npx tsx register.mjs`
+- **Headless server**: `xvfb-run --auto-servernum npx tsx register.mjs`
 
 ```javascript
 import { Demos } from "@kynesyslabs/demosdk/websdk";
@@ -50,34 +52,36 @@ async function postTweetPlaywright(proof) {
     ]);
 
     const page = await context.newPage();
+
+    // Visit home first (more human-like)
     await page.goto("https://x.com/home", { waitUntil: "networkidle", timeout: 60000 });
-    await sleep(2000);
-    await page.goto("https://x.com/compose/post", { waitUntil: "networkidle", timeout: 60000 });
+    await sleep(3000);
+
+    // Go to compose
+    await page.goto("https://x.com/compose/tweet", { waitUntil: "networkidle", timeout: 60000 });
     await sleep(2000);
 
     if (page.url().includes("login")) throw new Error("Not logged in");
 
-    const textbox = await page.locator('[data-testid="tweetTextarea_0"]');
-    await textbox.click();
-    await textbox.pressSequentially(proof, { delay: 30 });
-    await sleep(2000);
+    // Wait for and click textbox
+    await page.waitForSelector('[data-testid="tweetTextarea_0"]', { timeout: 10000 });
+    await page.click('[data-testid="tweetTextarea_0"]');
+    await page.fill('[data-testid="tweetTextarea_0"]', proof);
+    await sleep(1000);
 
-    await page.locator('[data-testid="tweetButton"]').click();
-    await sleep(8000);
+    // Click tweet button (tweetButtonInline for compose page)
+    await page.click('[data-testid="tweetButtonInline"]');
+    await sleep(5000);
 
-    if (page.url().includes("compose")) throw new Error("Tweet rejected");
-
-    await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Navigate to profile to get tweet URL
+    await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "networkidle", timeout: 60000 });
     await sleep(3000);
 
-    const links = await page.locator(`a[href*="/${TWITTER_HANDLE}/status/"]`).all();
-    const urls = [];
-    for (const link of links) {
-      const href = await link.getAttribute("href");
-      if (href) urls.push(`https://x.com${href}`);
-    }
+    const links = await page.$$eval('a[href*="/status/"]', els =>
+      els.map(e => e.href).filter(h => h.includes('/status/'))
+    );
 
-    const unique = [...new Set(urls)].sort((a, b) =>
+    const unique = [...new Set(links)].sort((a, b) =>
       BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1
     );
 
@@ -101,15 +105,17 @@ async function postTweetPuppeteer(proof) {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
+    await page.setUserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0");
     await page.setCookie(
       { name: "auth_token", value: cookies.auth_token, domain: ".x.com", path: "/", secure: true },
       { name: "ct0", value: cookies.ct0, domain: ".x.com", path: "/", secure: true }
     );
 
+    // Visit home first
     await page.goto("https://x.com/home", { waitUntil: "networkidle2", timeout: 60000 });
-    await sleep(2000);
+    await sleep(3000);
     await page.goto("https://x.com/compose/post", { waitUntil: "networkidle2", timeout: 60000 });
-    await sleep(2000);
+    await sleep(3000);
 
     if (page.url().includes("login")) throw new Error("Not logged in");
 
@@ -117,24 +123,26 @@ async function postTweetPuppeteer(proof) {
     if (!textbox) throw new Error("Textbox not found");
 
     await textbox.click();
+    await sleep(500);
+
+    // Type slowly to avoid detection
     for (let i = 0; i < proof.length; i++) {
       await page.keyboard.type(proof[i], { delay: 25 + Math.random() * 25 });
       if (i % 15 === 0) await sleep(100);
     }
 
-    await sleep(2000);
+    await sleep(3000);
     await (await page.$('[data-testid="tweetButton"]')).click();
-    await sleep(8000);
+    await sleep(10000);
 
     if (page.url().includes("compose")) throw new Error("Tweet rejected");
 
     await page.goto(`https://x.com/${TWITTER_HANDLE}`, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await sleep(3000);
+    await sleep(5000);
 
-    const links = await page.$$eval(`a[href*="/${TWITTER_HANDLE}/status/"]`, els => els.map(e => e.href));
-    const unique = [...new Set(links)].sort((a, b) =>
-      BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1
-    );
+    const links = await page.$$eval('a[href*="/status/"]', els => els.map(e => e.href));
+    const unique = [...new Set(links.map(u => u.match(/https:\/\/x\.com\/\w+\/status\/\d+/)?.[0]).filter(Boolean))]
+      .sort((a, b) => BigInt(b.split("/status/")[1]) > BigInt(a.split("/status/")[1]) ? 1 : -1);
 
     if (unique[0]) return unique[0];
     throw new Error("Tweet posted but URL not found");
@@ -185,7 +193,7 @@ async function main() {
   let tweetUrl = null;
   console.log("\n📤 Posting tweet...");
 
-  // Method A: CLI (works on headless servers)
+  // Method A: CLI (works without display)
   try {
     tweetUrl = await postTweetCLI(proof);
     console.log("✓ Tweet posted via CLI");
@@ -193,7 +201,7 @@ async function main() {
     console.log(`  CLI failed: ${e.message}`);
   }
 
-  // Method B: Playwright (better headless support)
+  // Method B: Playwright (needs xvfb-run on headless servers)
   if (!tweetUrl && fs.existsSync(COOKIE_PATH)) {
     try {
       tweetUrl = await postTweetPlaywright(proof);
@@ -203,7 +211,7 @@ async function main() {
     }
   }
 
-  // Method C: Puppeteer (fallback browser automation)
+  // Method C: Puppeteer (needs xvfb-run on headless servers)
   if (!tweetUrl && fs.existsSync(COOKIE_PATH)) {
     try {
       tweetUrl = await postTweetPuppeteer(proof);
@@ -279,11 +287,25 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
    # Get from browser DevTools → Application → Cookies → x.com
    ```
 
-5. **Tweet posting priority:**
-   - `~/tweet` CLI (bird) - works on headless servers
-   - Playwright - better headless support
-   - Puppeteer - fallback browser automation
-   - Manual - if all automated methods fail
+5. **Headless server execution:**
+   ```bash
+   # Desktop/GUI:
+   npx tsx register.mjs
+
+   # Headless server (VPS, CI):
+   xvfb-run --auto-servernum npx tsx register.mjs
+   ```
+
+---
+
+## Tweet Posting Cascade
+
+| Priority | Method | Requirements |
+|----------|--------|--------------|
+| 1 | `~/tweet` CLI | bird CLI installed |
+| 2 | Playwright | cookies + xvfb-run on headless |
+| 3 | Puppeteer | cookies + xvfb-run on headless |
+| 4 | Manual | human posts tweet |
 
 ---
 
@@ -320,9 +342,9 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 | Nonce still 0 | You forgot `demos.broadcast(result)` |
 | "Invalid hex string" | Gist has trailing newline - use `echo -n` |
 | `Cannot find package` | Run scripts from ~ not /tmp |
-| "Missing X server" | CLI method works without display; browser methods need xvfb |
+| "Missing X server" | Use `xvfb-run --auto-servernum npx tsx register.mjs` |
+| Twitter "automated" (226) | Wait 2-5 min, Twitter rate limiting |
 | All tweet methods fail | Post tweet manually, then run link-twitter.mjs |
-| Twitter "automated" error | Wait 2 min, retry, or use different method |
 
 ---
 
