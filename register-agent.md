@@ -1,11 +1,104 @@
 # Demos Network Agent Registration
 
-Create a Cross-Context Identity (CCI) with GitHub and Twitter linked.
+Create a Cross-Context Identity (CCI) that links your GitHub and Twitter accounts to a Demos wallet, giving your AI agent a verifiable on-chain identity.
+
+## What is This?
+
+**Demos Network** is a decentralized infrastructure for AI agents. By registering, your agent gets:
+- A **unique blockchain address** (works across EVM, Solana, and other chains)
+- **Verified social links** (GitHub + Twitter prove you control those accounts)
+- **On-chain identity** that other agents and services can verify
+
+This enables agent-to-agent trust, payments, and reputation.
+
+---
+
+## Prerequisites (Complete These First!)
+
+### 1. Install Node.js (v18+)
+
+```bash
+# Check if installed
+node -v
+
+# If not installed:
+# macOS: brew install node
+# Ubuntu: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs
+# Windows: Download from https://nodejs.org/
+```
+
+### 2. Install Demos SDK
+
+```bash
+# Create a project directory (NOT in /tmp - packages won't persist)
+mkdir -p ~/demos-agent && cd ~/demos-agent
+
+# Initialize and install
+npm init -y
+npm install @kynesyslabs/demosdk
+
+# Optional: For automated tweeting
+npm install playwright puppeteer
+```
+
+### 3. Create GitHub Personal Access Token (GH_TOKEN)
+
+1. Go to https://github.com/settings/tokens
+2. Click **"Generate new token (classic)"**
+3. Give it a name like "Demos Agent"
+4. Select scope: **`gist`** (create gists)
+5. Click **Generate token**
+6. Copy the token (starts with `ghp_...`)
+
+```bash
+# Set the token in your environment
+export GH_TOKEN="ghp_your_token_here"
+
+# To persist across sessions, add to ~/.bashrc or ~/.zshrc:
+echo 'export GH_TOKEN="ghp_your_token_here"' >> ~/.bashrc
+```
+
+### 4. Twitter Cookies (Optional - for automated posting)
+
+If you want automated tweet posting, extract cookies from your browser:
+
+1. Log into https://x.com in Chrome/Firefox
+2. Open DevTools (F12 or Cmd+Opt+I)
+3. Go to **Application** → **Cookies** → **x.com**
+4. Find and copy these values:
+   - `auth_token` (long alphanumeric string)
+   - `ct0` (long alphanumeric string)
+
+```bash
+# Create config file
+mkdir -p ~/.config/bird
+cat > ~/.config/bird/config.json << 'EOF'
+{
+  "auth_token": "paste_auth_token_here",
+  "ct0": "paste_ct0_here"
+}
+EOF
+```
+
+**Note:** If you skip this, you can still register - you'll just need to post the verification tweet manually.
+
+### 5. Verify Setup
+
+```bash
+cd ~/demos-agent
+node -v                                    # Should show v18+
+npm list @kynesyslabs/demosdk             # Should show the package
+echo $GH_TOKEN                             # Should show your token
+```
+
+---
 
 ## Quick Start
 
 ```bash
-node -v && npm list @kynesyslabs/demosdk 2>/dev/null || echo "Run: npm install @kynesyslabs/demosdk"
+# After completing prerequisites above:
+cd ~/demos-agent
+npx tsx register.mjs
 ```
 
 ---
@@ -264,37 +357,19 @@ main().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
 
 ---
 
-## Before Running
+## Before Running Checklist
 
-1. **Install dependencies** (in your home directory, not /tmp):
-   ```bash
-   cd ~ && npm install @kynesyslabs/demosdk
-   # Optional for browser automation:
-   npm install playwright puppeteer
-   ```
+| Step | Command to Verify |
+|------|-------------------|
+| Node.js v18+ | `node -v` |
+| SDK installed | `npm list @kynesyslabs/demosdk` |
+| GH_TOKEN set | `echo $GH_TOKEN` |
+| Twitter handle edited | Check `TWITTER_HANDLE` in script |
+| Twitter cookies (optional) | `cat ~/.config/bird/config.json` |
 
-2. **Set environment:**
-   ```bash
-   export GH_TOKEN="your_github_token"
-   ```
+**Edit the script:** Change `TWITTER_HANDLE` to your Twitter username before running!
 
-3. **Edit the script:** Change `TWITTER_HANDLE` to your Twitter username
-
-4. **Twitter cookies** (optional, for browser automation):
-   ```bash
-   # Create ~/.config/bird/config.json with:
-   {"auth_token": "...", "ct0": "..."}
-   # Get from browser DevTools → Application → Cookies → x.com
-   ```
-
-5. **Headless server execution:**
-   ```bash
-   # Desktop/GUI:
-   npx tsx register.mjs
-
-   # Headless server (VPS, CI):
-   xvfb-run --auto-servernum npx tsx register.mjs
-   ```
+**Headless server (VPS/CI)?** Use: `xvfb-run --auto-servernum npx tsx register.mjs`
 
 ---
 
